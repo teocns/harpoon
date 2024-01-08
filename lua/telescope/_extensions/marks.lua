@@ -3,9 +3,10 @@ local action_utils = require("telescope.actions.utils")
 local entry_display = require("telescope.pickers.entry_display")
 local finders = require("telescope.finders")
 local pickers = require("telescope.pickers")
+local Path = require("plenary.path")
 local conf = require("telescope.config").values
 local harpoon = require("harpoon")
-
+-- local utils = require("telescope.utils")
 local function filter_empty_string(list)
     local next = {}
     for idx = 1, #list do
@@ -17,35 +18,61 @@ local function filter_empty_string(list)
     return next
 end
 
-local generate_new_finder = function()
+local generate_new_finder = function(opts)
+    opts = opts or {}
     return finders.new_table({
-        results = filter_empty_string(harpoon:list().items),
+        results = filter_empty_string(harpoon:list(opts.name).items),
         entry_maker = function(entry)
-            local line = entry.value
-                .. ":"
-                .. entry.context.row
-                .. ":"
-                .. entry.context.col
-            local displayer = entry_display.create({
-                separator = " - ",
-                items = {
-                    { width = 2 },
-                    { width = 50 },
-                    { remaining = true },
+            local filepath = entry.value
+            -- print(vim.inspect(entry))
+
+            local entry_items = {
+                {
+                    width = 2,
+                    -- highlight = "TelescopeResultsIdentifier",
                 },
+                {
+                    -- calculate exact width based on the `name` field
+                    width = #entry.context.name,
+                },
+                { remaining = true },
+            }
+
+            local displayer_entries = {
+                {
+                    entry.context.icon,
+                    "DevIconC",
+                    -- highlight = "TelescopeResultsIdentifier",
+                },
+                {
+                    entry.context.name,
+                    "LspInfoList",
+                },
+                {
+                    Path:new(filepath):make_relative(vim.loop.cwd())
+                    .. ":"
+                    .. entry.context.pos[1]
+                    .. ":"
+                    .. entry.context.pos[2],
+                    "TeleScopeResultsIdentifier",
+                },
+            }
+
+            local displayer = entry_display.create({
+                separator = " ",
+                items = entry_items,
             })
-            local make_display = function()
-                return displayer({
-                    tostring(entry.index),
-                    line,
-                })
+
+            local make_display = function(_)
+                return displayer(displayer_entries)
             end
             return {
                 value = entry,
-                ordinal = line,
+                ordinal = filepath,
                 display = make_display,
-                lnum = entry.row,
-                col = entry.col,
+                lnum = entry.context.pos[1],
+                -- row = entry.context.lnum,
+                col = entry.context.pos[2],
                 filename = entry.value,
             }
         end,
@@ -115,11 +142,13 @@ end
 return function(opts)
     opts = opts or {}
 
+    opts.dynamic_title = true
     pickers
         .new(opts, {
-            prompt_title = "harpoon marks",
-            finder = generate_new_finder(),
+            dynamic_preview_title = true,
+            finder = generate_new_finder(opts),
             sorter = conf.generic_sorter(opts),
+            layout_strategy = "vertical",
             previewer = conf.grep_previewer(opts),
             attach_mappings = function(_, map)
                 map("i", "<c-d>", delete_harpoon_mark)

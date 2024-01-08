@@ -140,7 +140,7 @@ function Harpoon.setup(self, partial_config)
     ---TODO: should we go through every seen list and update its config?
 
     if self.hooks_setup == false then
-        vim.api.nvim_create_autocmd({ "BufLeave", "VimLeavePre" }, {
+        vim.api.nvim_create_autocmd({ "VimLeavePre" }, {
             group = HarpoonGroup,
             pattern = "*",
             callback = function(ev)

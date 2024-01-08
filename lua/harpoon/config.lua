@@ -1,11 +1,12 @@
 local Extensions = require("harpoon.extensions")
 local Logger = require("harpoon.logger")
 local Path = require("plenary.path")
-local function normalize_path(buf_name, root)
+
+local M = {}
+function M.normalize_path(buf_name, root)
     return Path:new(buf_name):make_relative(root)
 end
 
-local M = {}
 local DEFAULT_LIST = "__harpoon_files"
 M.DEFAULT_LIST = DEFAULT_LIST
 
@@ -48,6 +49,44 @@ M.DEFAULT_LIST = DEFAULT_LIST
 ---@return HarpoonPartialConfigItem
 function M.get_config(config, name)
     return vim.tbl_extend("force", {}, config.default, config[name] or {})
+end
+
+--- An `init` function to build a set of children components for LSP breadcrumbs
+---@param opts? table # options for configuring the breadcrumbs { separator = string, max_depth = number }
+---@return string
+local function breadcrumbs(opts, locations)
+    opts = opts or {}
+    opts.separator = opts.separator or ":"
+    local data = locations
+    local children = {}
+    -- add prefix if needed, use the separator if true, or use the provided character
+    local start_idx = 0
+
+    if opts.max_depth and opts.max_depth > 0 then
+        start_idx = #data - opts.max_depth
+        -- if start_idx > 0 then
+        --     table.insert(children, opts.separator)
+        -- end
+    end
+    -- create a child for each level
+    for i, d in ipairs(data) do
+        if i > start_idx then
+            local child = {
+                -- string.gsub(d.name, "%%", "%%%%"):gsub("%s*->%s*", ""), -- add symbol name
+                d.name
+            }
+            if #data > 1 and i < #data then
+                table.insert(child, opts.separator)
+            end -- add a separator only if needed
+            table.insert(children, child)
+        end
+    end
+    -- stringify all children
+    local ret = ""
+    for _, child in ipairs(children) do
+        ret = ret .. table.concat(child)
+    end
+    return ret
 end
 
 ---@return HarpoonConfig
@@ -140,6 +179,9 @@ function M.get_default_config()
             ---@param list_item_b HarpoonListItem
             equals = function(list_item_a, list_item_b)
                 return list_item_a.value == list_item_b.value
+                    and list_item_a.context.pos[1] == list_item_b.context.pos[1]
+                    and list_item_a.context.pos[2]
+                    == list_item_b.context.pos[2]
             end,
 
             get_root_dir = function()
@@ -150,60 +192,75 @@ function M.get_default_config()
             ---@param name? any
             ---@return HarpoonListItem
             create_list_item = function(config, name)
-                name = name
-                    -- TODO: should we do path normalization???
-                    -- i know i have seen sometimes it becoming an absolute
-                    -- path, if that is the case we can use the context to
-                    -- store the bufname and then have value be the normalized
-                    -- value
-                    or normalize_path(
-                        vim.api.nvim_buf_get_name(
-                            vim.api.nvim_get_current_buf()
-                        ),
-                        config.get_root_dir()
-                    )
+                -- name = name
+                --     -- TODO: should we do path normalization???
+                --     -- i know i have seen sometimes it becoming an absolute
+                --     -- path, if that is the case we can use the context to
+                --     -- store the bufname and then have value be the normalized
+                --     -- value
+                --     or M.normalize_path(
+                --         config.get_root_dir()
+                --     )
+                --
 
-                Logger:log("config_default#create_list_item", name)
+                -- local bufnr = vim.fn.bufnr(path, false)
 
-                local bufnr = vim.fn.bufnr(name, false)
+                local abspath =
+                    vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
 
-                local pos = { 1, 0 }
-                if bufnr ~= -1 then
-                    pos = vim.api.nvim_win_get_cursor(0)
+                Logger:log("config_default#create_list_item", abspath)
+                local pos = vim.api.nvim_win_get_cursor(0)
+
+                local aerial_avail, aerial = pcall(require, "aerial")
+                if aerial_avail then
+                    local locations = aerial.get_location(true)
+                    -- Get the last location in the list
+                    local cur_loc = locations[#locations]
+                    cur_loc.pos = pos
+                    cur_loc.name = breadcrumbs({},locations)
+                    return {
+                        value = abspath,
+                        context = cur_loc,
+                    }
                 end
+
+                -- local bufnr = vim.api.nvim_get_current_buf()
+                -- name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+                -- if bufnr == -1 then
+                --     error("Invalid buffer")
+                -- end
+                -- pos = vim.api.nvim_win_get_cursor(0)
 
                 return {
                     value = name,
-                    context = {
-                        row = pos[1],
-                        col = pos[2],
-                    },
+                    context = { pos },
                 }
             end,
 
             BufLeave = function(arg, list)
-                local bufnr = arg.buf
-                local bufname = vim.api.nvim_buf_get_name(bufnr)
-                local item = list:get_by_display(bufname)
-
-                if item then
-                    local pos = vim.api.nvim_win_get_cursor(0)
-
-                    Logger:log(
-                        "config_default#BufLeave updating position",
-                        bufnr,
-                        bufname,
-                        item,
-                        "to position",
-                        pos
-                    )
-
-                    item.context.row = pos[1]
-                    item.context.col = pos[2]
-                end
+                return
+                -- local bufnr = arg.buf
+                -- local bufname = vim.api.nvim_buf_get_name(bufnr)
+                -- local item = list:get_by_display(bufname)
+                --
+                -- if item then
+                --     local pos = vim.api.nvim_win_get_cursor(0)
+                --
+                --     Logger:log(
+                --         "config_default#BufLeave updating position",
+                --         bufnr,
+                --         bufname,
+                --         item,
+                --         "to position",
+                --         pos
+                --     )
+                --
+                --     item.context.row = pos[1]
+                --     item.context.col = pos[2]
+                -- end
             end,
 
-            autocmds = { "BufLeave" },
+            -- autocmds = { "BufLeave" },
         },
     }
 end
